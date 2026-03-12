@@ -14,8 +14,15 @@ class CustomCTRL:
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
 
-        # ----- config: jog parameters -----
-        self.jog_speed = config.getfloat('jog_speed', 10., above=0.)
+        # ----- config: per-axis jog speed and increment -----
+        default_speed = config.getfloat('jog_speed', 10., above=0.)
+        self.jog_speed = {}
+        self.jog_increment = {}
+        for axis in ('x', 'y', 'z'):
+            self.jog_speed[axis] = config.getfloat(
+                '%s_jog_speed' % axis, default_speed, above=0.)
+            self.jog_increment[axis] = config.getfloat(
+                '%s_jog_increment' % axis, 0., minval=0.)
 
         # ----- config: extrusion via volumetric flow -----
         self.filament_diameter = config.getfloat(
@@ -96,10 +103,14 @@ class CustomCTRL:
         except Exception:
             self.virtual_sdcard = None
         self.is_ready = True
-        self._log_info("ready (flow=%.1f mm3/s, filament=%.2f mm, "
-                       "E rate=%.3f mm/s, jog=%.1f mm/s)"
-                       % (self.volumetric_flow, self.filament_diameter,
-                          self.extrude_rate, self.jog_speed))
+        axis_info = ', '.join(
+            '%s=%.1fmm/s' % (a.upper(), self.jog_speed[a])
+            + (' (%.2fmm/tick)' % self.jog_increment[a]
+               if self.jog_increment[a] > 0. else '')
+            for a in ('x', 'y', 'z'))
+        self._log_info("ready (%s, flow=%.1f mm3/s, E=%.3f mm/s)"
+                       % (axis_info, self.volumetric_flow,
+                          self.extrude_rate))
 
     def _register_buttons(self, config):
         buttons = self.printer.load_object(config, 'buttons')
@@ -193,17 +204,18 @@ class CustomCTRL:
             self._log_info("jog resumed — condition cleared")
             self._last_block_reason = None
 
-        # Derive per-tick distances from speed so motion is consistent
-        jog_step = self.jog_speed * LOOP_INTERVAL
         extrude_step = self.extrude_rate * LOOP_INTERVAL
 
         dx = dy = dz = de = 0.
         if self.button_states.get('x', False):
-            dx = jog_step
+            inc = self.jog_increment['x']
+            dx = inc if inc > 0. else self.jog_speed['x'] * LOOP_INTERVAL
         if self.button_states.get('y', False):
-            dy = jog_step
+            inc = self.jog_increment['y']
+            dy = inc if inc > 0. else self.jog_speed['y'] * LOOP_INTERVAL
         if self.button_states.get('z', False):
-            dz = jog_step
+            inc = self.jog_increment['z']
+            dz = inc if inc > 0. else self.jog_speed['z'] * LOOP_INTERVAL
         if self.button_states.get('extrude', False):
             de = extrude_step
 
@@ -217,9 +229,18 @@ class CustomCTRL:
             if (new_pos[0] == cur[0] and new_pos[1] == cur[1]
                     and new_pos[2] == cur[2] and new_pos[3] == cur[3]):
                 return eventtime + LOOP_INTERVAL
-            speed = self.jog_speed
-            if dx == 0. and dy == 0. and dz == 0.:
+            # Use the fastest active axis speed for the combined move
+            active_speeds = []
+            if dx != 0.:
+                active_speeds.append(self.jog_speed['x'])
+            if dy != 0.:
+                active_speeds.append(self.jog_speed['y'])
+            if dz != 0.:
+                active_speeds.append(self.jog_speed['z'])
+            if not active_speeds:
                 speed = self.extrude_rate
+            else:
+                speed = max(active_speeds)
             max_vel = self.toolhead.get_max_velocity()[0]
             speed = min(speed, max_vel)
             self.toolhead.manual_move(new_pos, speed)

@@ -45,7 +45,15 @@ Add a `[customctrl]` section to your `printer.cfg`. See [`printer_snippet.cfg`](
 | `x_jog_pin` | *(none)* | MCU pin for X-axis jog button |
 | `y_jog_pin` | *(none)* | MCU pin for Y-axis jog button |
 | `z_jog_pin` | *(none)* | MCU pin for Z-axis jog button |
-| `jog_speed` | `10` | Jog speed in mm/s (per-tick distance is derived automatically) |
+| `jog_speed` | `10` | Default jog speed for all axes in mm/s |
+| `x_jog_speed` | `jog_speed` | X-axis jog speed in mm/s |
+| `y_jog_speed` | `jog_speed` | Y-axis jog speed in mm/s |
+| `z_jog_speed` | `jog_speed` | Z-axis jog speed in mm/s |
+| `x_jog_increment` | `0` | X distance per tick in mm (0 = derive from speed) |
+| `y_jog_increment` | `0` | Y distance per tick in mm (0 = derive from speed) |
+| `z_jog_increment` | `0` | Z distance per tick in mm (0 = derive from speed) |
+
+When `*_jog_increment` is 0 (default), the per-tick distance is `speed * 0.05s`. When set, it overrides the speed-derived value for that axis, giving fixed-distance-per-tick control.
 
 ### Extrude button (hold to extrude)
 
