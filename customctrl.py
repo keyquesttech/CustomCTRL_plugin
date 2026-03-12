@@ -98,6 +98,29 @@ class CustomCTRL:
         self.gcode.respond_info("CustomCTRL ERROR: %s" % msg)
 
     # ------------------------------------------------------------------
+    # Debug logging (for jitter investigation)
+    # ------------------------------------------------------------------
+    def _dbg_log(self, hypothesis_id, message, data):
+        # region agent log
+        try:
+            import json, time
+            payload = {
+                "sessionId": "33c95a",
+                "runId": "pre-fix",
+                "hypothesisId": hypothesis_id,
+                "location": "customctrl.py",
+                "message": message,
+                "data": data,
+                "timestamp": int(time.time() * 1000),
+            }
+            with open("debug-33c95a.log", "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        except Exception:
+            # Swallow all logging errors to avoid impacting motion
+            pass
+        # endregion agent log
+
+    # ------------------------------------------------------------------
     # Startup
     # ------------------------------------------------------------------
     def _handle_ready(self):
@@ -244,6 +267,13 @@ class CustomCTRL:
                 de = -self.retract_increment
                 e_speed = self.retract_speed
 
+        # Log the computed deltas for jitter analysis (H1: step size / direction)
+        self._dbg_log("H1", "jog_tick_deltas", {
+            "dx": dx, "dy": dy, "dz": dz, "de": de,
+            "e_speed": e_speed,
+            "buttons": {k: v for k, v in self.button_states.items() if v},
+        })
+
         if dx == 0. and dy == 0. and dz == 0. and de == 0.:
             return eventtime + LOOP_INTERVAL
 
@@ -269,6 +299,16 @@ class CustomCTRL:
                 speed = max(active_speeds) if active_speeds else self.jog_speed['x']
             max_vel = self.toolhead.get_max_velocity()[0]
             speed = min(speed, max_vel)
+
+            # Log the final speed and position (H2: interaction between speed and jitter)
+            self._dbg_log("H2", "jog_tick_move", {
+                "speed": speed,
+                "cur": cur,
+                "new_pos": new_pos,
+                "active_speeds": active_speeds,
+                "max_vel": max_vel,
+            })
+
             self.toolhead.manual_move(new_pos, speed)
             self.toolhead.flush_step_generation()
         except Exception as e:
