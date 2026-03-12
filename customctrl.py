@@ -58,6 +58,7 @@ class CustomCTRL:
         self.button_states = {}
         self.jog_timer = None
         self.is_ready = False
+        self._last_block_reason = None
 
         # Classify which button names are "continuous" (jog / extrude)
         self._continuous_names = set()
@@ -155,8 +156,9 @@ class CustomCTRL:
     # Macro execution
     # ------------------------------------------------------------------
     def _fire_macro(self, pin_name):
-        if not self._check_safe():
-            self._log_error("macro blocked — printer not safe to move")
+        reason = self._check_safe()
+        if reason is not None:
+            self._log_error("macro blocked: %s" % reason)
             return
         gcode_line = self.macro_pins[pin_name]['gcode']
         self._log_info("firing macro: %s" % gcode_line)
@@ -181,8 +183,15 @@ class CustomCTRL:
             self._stop_jog_loop()
             return self.reactor.NEVER
 
-        if not self._check_safe():
+        reason = self._check_safe()
+        if reason is not None:
+            if reason != self._last_block_reason:
+                self._log_error("jog blocked: %s" % reason)
+                self._last_block_reason = reason
             return eventtime + LOOP_INTERVAL
+        if self._last_block_reason is not None:
+            self._log_info("jog resumed — condition cleared")
+            self._last_block_reason = None
 
         # Derive per-tick distances from speed so motion is consistent
         jog_step = self.jog_speed * LOOP_INTERVAL
@@ -213,9 +222,8 @@ class CustomCTRL:
                 speed = self.extrude_rate
             max_vel = self.toolhead.get_max_velocity()[0]
             speed = min(speed, max_vel)
-            # Let the lookahead queue handle acceleration smoothing;
-            # only flush on stop so consecutive moves chain smoothly.
             self.toolhead.manual_move(new_pos, speed)
+            self.toolhead.flush_step_generation()
         except Exception as e:
             self._log_error("jog tick failed: %s" % e)
 
@@ -225,6 +233,7 @@ class CustomCTRL:
         if self.jog_timer is not None:
             self.reactor.unregister_timer(self.jog_timer)
             self.jog_timer = None
+        self._last_block_reason = None
         try:
             if self.toolhead is not None:
                 self.toolhead.flush_step_generation()
@@ -258,21 +267,22 @@ class CustomCTRL:
         return clamped
 
     # ------------------------------------------------------------------
-    # Safety checks
+    # Safety checks — returns None if safe, or a reason string if blocked
     # ------------------------------------------------------------------
     def _check_safe(self):
         if self.toolhead is None:
-            return False
+            return "toolhead not available (printer not ready)"
         if self.virtual_sdcard is not None and self.virtual_sdcard.is_active():
-            return False
+            return "SD card print is active"
         kin = self.toolhead.get_kinematics()
         eventtime = self.reactor.monotonic()
         kin_status = kin.get_status(eventtime)
         homed = kin_status.get('homed_axes', '')
-        for axis in ('x', 'y', 'z'):
-            if self.button_states.get(axis, False) and axis not in homed:
-                return False
-        return True
+        unhomed = [a.upper() for a in ('x', 'y', 'z')
+                   if self.button_states.get(a, False) and a not in homed]
+        if unhomed:
+            return "%s not homed" % ', '.join(unhomed)
+        return None
 
 
 def load_config(config):
