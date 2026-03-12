@@ -35,16 +35,18 @@ class CustomCTRL:
         # ----- config: terminal output -----
         self.verbose = config.getboolean('verbose', False)
 
-        # ----- config: jog pins (optional per axis) -----
+        # ----- config: directional jog pins (positive / negative) -----
         self.jog_pins = {}
         for axis in ('x', 'y', 'z'):
-            pin_name = '%s_jog_pin' % axis
-            pin = config.get(pin_name, None)
-            if pin is not None:
-                self.jog_pins[axis] = pin
+            for direction in ('pos', 'neg'):
+                key = '%s_%s_pin' % (axis, direction)
+                pin = config.get(key, None)
+                if pin is not None:
+                    self.jog_pins['%s_%s' % (axis, direction)] = pin
 
-        # ----- config: extrude pin (hold-to-extrude) -----
+        # ----- config: extrude / retract pins -----
         self.extrude_pin = config.get('extrude_pin', None)
+        self.retract_pin = config.get('retract_pin', None)
 
         # ----- config: macro pins (press-to-fire) -----
         self.macro_pins = {}
@@ -68,11 +70,11 @@ class CustomCTRL:
         self._last_block_reason = None
 
         # Classify which button names are "continuous" (jog / extrude)
-        self._continuous_names = set()
-        for axis in self.jog_pins:
-            self._continuous_names.add(axis)
+        self._continuous_names = set(self.jog_pins.keys())
         if self.extrude_pin is not None:
             self._continuous_names.add('extrude')
+        if self.retract_pin is not None:
+            self._continuous_names.add('retract')
 
         # Pin registration must happen at config time (before MCU start),
         # so register buttons now — callbacks only fire after MCU is live.
@@ -115,8 +117,7 @@ class CustomCTRL:
     def _register_buttons(self, config):
         buttons = self.printer.load_object(config, 'buttons')
 
-        for axis, pin in self.jog_pins.items():
-            name = axis
+        for name, pin in self.jog_pins.items():
             self.button_states[name] = False
             buttons.register_buttons(
                 [pin],
@@ -128,6 +129,13 @@ class CustomCTRL:
             buttons.register_buttons(
                 [self.extrude_pin],
                 (lambda et, s: self._on_button(et, s, 'extrude'))
+            )
+
+        if self.retract_pin is not None:
+            self.button_states['retract'] = False
+            buttons.register_buttons(
+                [self.retract_pin],
+                (lambda et, s: self._on_button(et, s, 'retract'))
             )
 
         for mname, minfo in self.macro_pins.items():
@@ -179,7 +187,7 @@ class CustomCTRL:
             self._log_error("macro '%s' failed: %s" % (gcode_line, e))
 
     # ------------------------------------------------------------------
-    # Game loop — smooth motion
+    # Game loop
     # ------------------------------------------------------------------
     def _ensure_jog_loop_running(self, eventtime):
         if self.jog_timer is not None:
@@ -188,6 +196,16 @@ class CustomCTRL:
         waketime = self.reactor.monotonic() + LOOP_INTERVAL
         self.jog_timer = self.reactor.register_timer(
             self._jog_tick, waketime)
+
+    def _axis_delta(self, axis):
+        """Return signed step for an axis based on pos/neg button states."""
+        pos = self.button_states.get('%s_pos' % axis, False)
+        neg = self.button_states.get('%s_neg' % axis, False)
+        if pos == neg:
+            return 0.
+        inc = self.jog_increment[axis]
+        step = inc if inc > 0. else self.jog_speed[axis] * LOOP_INTERVAL
+        return step if pos else -step
 
     def _jog_tick(self, eventtime):
         if not self._any_continuous_held():
@@ -204,20 +222,17 @@ class CustomCTRL:
             self._log_info("jog resumed — condition cleared")
             self._last_block_reason = None
 
-        extrude_step = self.extrude_rate * LOOP_INTERVAL
+        dx = self._axis_delta('x')
+        dy = self._axis_delta('y')
+        dz = self._axis_delta('z')
 
-        dx = dy = dz = de = 0.
-        if self.button_states.get('x', False):
-            inc = self.jog_increment['x']
-            dx = inc if inc > 0. else self.jog_speed['x'] * LOOP_INTERVAL
-        if self.button_states.get('y', False):
-            inc = self.jog_increment['y']
-            dy = inc if inc > 0. else self.jog_speed['y'] * LOOP_INTERVAL
-        if self.button_states.get('z', False):
-            inc = self.jog_increment['z']
-            dz = inc if inc > 0. else self.jog_speed['z'] * LOOP_INTERVAL
-        if self.button_states.get('extrude', False):
-            de = extrude_step
+        # Extrude / retract
+        de = 0.
+        e_fwd = self.button_states.get('extrude', False)
+        e_rev = self.button_states.get('retract', False)
+        if e_fwd != e_rev:
+            e_step = self.extrude_rate * LOOP_INTERVAL
+            de = e_step if e_fwd else -e_step
 
         if dx == 0. and dy == 0. and dz == 0. and de == 0.:
             return eventtime + LOOP_INTERVAL
@@ -229,7 +244,6 @@ class CustomCTRL:
             if (new_pos[0] == cur[0] and new_pos[1] == cur[1]
                     and new_pos[2] == cur[2] and new_pos[3] == cur[3]):
                 return eventtime + LOOP_INTERVAL
-            # Use the fastest active axis speed for the combined move
             active_speeds = []
             if dx != 0.:
                 active_speeds.append(self.jog_speed['x'])
@@ -299,8 +313,13 @@ class CustomCTRL:
         eventtime = self.reactor.monotonic()
         kin_status = kin.get_status(eventtime)
         homed = kin_status.get('homed_axes', '')
-        unhomed = [a.upper() for a in ('x', 'y', 'z')
-                   if self.button_states.get(a, False) and a not in homed]
+        unhomed = []
+        for axis in ('x', 'y', 'z'):
+            if axis in homed:
+                continue
+            if (self.button_states.get('%s_pos' % axis, False)
+                    or self.button_states.get('%s_neg' % axis, False)):
+                unhomed.append(axis.upper())
         if unhomed:
             return "%s not homed" % ', '.join(unhomed)
         return None

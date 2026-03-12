@@ -40,11 +40,16 @@ Add a `[customctrl]` section to your `printer.cfg`. See [`printer_snippet.cfg`](
 
 ### Jog buttons (hold to jog)
 
+Each axis has separate positive and negative direction pins. Define only the directions you have wired.
+
 | Option | Default | Description |
 |---|---|---|
-| `x_jog_pin` | *(none)* | MCU pin for X-axis jog button |
-| `y_jog_pin` | *(none)* | MCU pin for Y-axis jog button |
-| `z_jog_pin` | *(none)* | MCU pin for Z-axis jog button |
+| `x_pos_pin` | *(none)* | MCU pin for X positive jog |
+| `x_neg_pin` | *(none)* | MCU pin for X negative jog |
+| `y_pos_pin` | *(none)* | MCU pin for Y positive jog |
+| `y_neg_pin` | *(none)* | MCU pin for Y negative jog |
+| `z_pos_pin` | *(none)* | MCU pin for Z positive jog (up) |
+| `z_neg_pin` | *(none)* | MCU pin for Z negative jog (down) |
 | `jog_speed` | `10` | Default jog speed for all axes in mm/s |
 | `x_jog_speed` | `jog_speed` | X-axis jog speed in mm/s |
 | `y_jog_speed` | `jog_speed` | Y-axis jog speed in mm/s |
@@ -55,16 +60,21 @@ Add a `[customctrl]` section to your `printer.cfg`. See [`printer_snippet.cfg`](
 
 When `*_jog_increment` is 0 (default), the per-tick distance is `speed * 0.05s`. When set, it overrides the speed-derived value for that axis, giving fixed-distance-per-tick control.
 
-### Extrude button (hold to extrude)
+If both positive and negative buttons for the same axis are held simultaneously, they cancel out and the axis does not move.
+
+### Extrude / retract buttons (hold to extrude)
 
 | Option | Default | Description |
 |---|---|---|
-| `extrude_pin` | *(none)* | MCU pin for extrude button |
+| `extrude_pin` | *(none)* | MCU pin for extrude (forward) button |
+| `retract_pin` | *(none)* | MCU pin for retract (reverse) button |
 | `filament_diameter` | `1.75` | Filament diameter in mm |
 | `volumetric_flow` | `1.0` | Target volumetric flow rate in mm³/s |
 
 The linear extrusion rate is calculated automatically:
 `E_rate = volumetric_flow / (pi * (filament_diameter / 2)²)`
+
+If both extrude and retract are held simultaneously, they cancel out.
 
 ### Macro buttons (press to fire)
 
