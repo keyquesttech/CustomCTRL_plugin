@@ -94,6 +94,16 @@ Up to 8 macro buttons. Each requires both a pin and a G-code line:
 
 Errors are always shown in the console regardless of the `verbose` setting.
 
+### Debug log (Mainsail download)
+
+The plugin writes a debug log (NDJSON) for jog/motion analysis. By default it is written to:
+
+- `~/printer_data/logs/customctrl_debug.log`
+
+That path is the same directory as Klipper’s logs, so the file appears in **Mainsail → Machine → Logs** and can be downloaded like `klippy.log`. You can override the path in `[customctrl]` with:
+
+- `debug_log_path: /path/to/your/customctrl_debug.log`
+
 ### Pin syntax
 
 Follows standard Klipper pin notation:

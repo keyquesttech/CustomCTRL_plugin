@@ -4,7 +4,7 @@
 # Copyright (C) 2026
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
-import math, logging
+import math, logging, os
 
 LOOP_INTERVAL = 0.050  # 20 Hz
 
@@ -36,6 +36,11 @@ class CustomCTRL:
 
         # ----- config: terminal output -----
         self.verbose = config.getboolean('verbose', False)
+
+        # ----- config: debug log path (for Mainsail download) -----
+        default_log = os.path.expanduser("~/printer_data/logs/customctrl_debug.log")
+        self.debug_log_path = os.path.normpath(
+            config.get("debug_log_path", default_log))
 
         # ----- config: directional jog pins (positive / negative) -----
         self.jog_pins = {}
@@ -113,7 +118,13 @@ class CustomCTRL:
                 "data": data,
                 "timestamp": int(time.time() * 1000),
             }
-            with open("debug-33c95a.log", "a", encoding="utf-8") as f:
+            log_path = getattr(self, "debug_log_path", None)
+            if log_path is None:
+                log_path = os.path.expanduser("~/printer_data/logs/customctrl_debug.log")
+            log_dir = os.path.dirname(log_path)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(payload) + "\n")
         except Exception:
             # Swallow all logging errors to avoid impacting motion
