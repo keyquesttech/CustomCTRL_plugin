@@ -100,9 +100,20 @@ The plugin writes a debug log (NDJSON) for jog/motion analysis. By default it is
 
 - `~/printer_data/logs/customctrl_debug.log`
 
-That path is the same directory as Klipper’s logs, so the file appears in **Mainsail → Machine → Logs** and can be downloaded like `klippy.log`. You can override the path in `[customctrl]` with:
-
+You can override the path in `[customctrl]` with (see below for Mainsail button).
 - `debug_log_path: /path/to/your/customctrl_debug.log`
+
+**Add a "CustomCTRL debug" download button in Mainsail (below Moonraker):**  
+Mainsail's Machine → Logs panel only shows download buttons for a fixed list of log names. To add one for `customctrl_debug.log` (directly under the Moonraker log button), apply the included patch to your Mainsail source, then rebuild:
+
+1. Clone or open your Mainsail repo (e.g. `~/mainsail` or your MainsailOS build).
+2. From inside the **Mainsail** repo root, apply the patch:
+   ```bash
+   patch -p1 < /path/to/CustomCTRL_plugin/mainsail/mainsail-add-customctrl-log.patch
+   ```
+3. Rebuild/update Mainsail (e.g. `npm run build` and redeploy the `dist` folder, or update MainsailOS).
+
+After applying the patch, **Machine → Logs** will show a "customctrl_debug" download button below the Moonraker log button.
 
 ### Pin syntax
 

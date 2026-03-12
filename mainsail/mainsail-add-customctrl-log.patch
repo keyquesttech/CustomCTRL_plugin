@@ -1,0 +1,7 @@
+--- a/src/store/variables.ts
++++ b/src/store/variables.ts
+@@ -153,7 +153,7 @@ export const excludeKeys = [
+  * List of all downloadable logfiles
+  */
+-export const genericLogfiles = ['klippy', 'moonraker', 'crowsnest', 'mmu', 'sonar']
++export const genericLogfiles = ['klippy', 'moonraker', 'customctrl_debug', 'crowsnest', 'mmu', 'sonar']
