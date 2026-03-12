@@ -68,12 +68,13 @@ If both positive and negative buttons for the same axis are held simultaneously,
 |---|---|---|
 | `extrude_pin` | *(none)* | MCU pin for extrude (forward) button |
 | `retract_pin` | *(none)* | MCU pin for retract (reverse) button |
-| `filament_diameter` | `1.75` | Filament diameter in mm |
-| `volumetric_flow` | `1.0` | Target volumetric flow rate in mm³/s |
+| `extrude_speed` | `5.0` | Extrusion speed in mm/s while extruding |
+| `retract_speed` | `2.0` | Retraction speed in mm/s while retracting |
+| `extrude_increment` | `0.25` | Filament length per tick in mm while extruding (5mm/s at 20Hz) |
+| `retract_increment` | `0.2` | Filament length per tick in mm while retracting |
 
-The linear extrusion rate is calculated automatically:
-`E_rate = volumetric_flow / (pi * (filament_diameter / 2)²)`
-
+Extrusion and retraction use these manual values every tick while the
+buttons are held, independent of which axis jog buttons are active.
 If both extrude and retract are held simultaneously, they cancel out.
 
 ### Macro buttons (press to fire)

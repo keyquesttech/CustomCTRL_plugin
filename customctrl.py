@@ -24,13 +24,15 @@ class CustomCTRL:
             self.jog_increment[axis] = config.getfloat(
                 '%s_jog_increment' % axis, 0., minval=0.)
 
-        # ----- config: extrusion via volumetric flow -----
-        self.filament_diameter = config.getfloat(
-            'filament_diameter', 1.75, above=0.)
-        self.volumetric_flow = config.getfloat(
-            'volumetric_flow', 1., above=0.)
-        filament_area = math.pi * (self.filament_diameter / 2.) ** 2
-        self.extrude_rate = self.volumetric_flow / filament_area
+        # ----- config: manual extrusion / retraction values -----
+        # Distances are in mm of filament per tick; speeds are in mm/s.
+        self.extrude_speed = config.getfloat('extrude_speed', 5., above=0.)
+        self.retract_speed = config.getfloat(
+            'retract_speed', self.extrude_speed, above=0.)
+        self.extrude_increment = config.getfloat(
+            'extrude_increment', 0.25, above=0.)
+        self.retract_increment = config.getfloat(
+            'retract_increment', self.extrude_increment, above=0.)
 
         # ----- config: terminal output -----
         self.verbose = config.getboolean('verbose', False)
@@ -110,9 +112,12 @@ class CustomCTRL:
             + (' (%.2fmm/tick)' % self.jog_increment[a]
                if self.jog_increment[a] > 0. else '')
             for a in ('x', 'y', 'z'))
-        self._log_info("ready (%s, flow=%.1f mm3/s, E=%.3f mm/s)"
-                       % (axis_info, self.volumetric_flow,
-                          self.extrude_rate))
+        self._log_info(
+            "ready (%s, extrude=%.1fmm/s@%.3fmm/tick, retract=%.1fmm/s@%.3fmm/tick)"
+            % (axis_info,
+               self.extrude_speed, self.extrude_increment,
+               self.retract_speed, self.retract_increment)
+        )
 
     def _register_buttons(self, config):
         buttons = self.printer.load_object(config, 'buttons')
@@ -226,13 +231,18 @@ class CustomCTRL:
         dy = self._axis_delta('y')
         dz = self._axis_delta('z')
 
-        # Extrude / retract
+        # Extrude / retract (manual values)
         de = 0.
+        e_speed = 0.
         e_fwd = self.button_states.get('extrude', False)
         e_rev = self.button_states.get('retract', False)
         if e_fwd != e_rev:
-            e_step = self.extrude_rate * LOOP_INTERVAL
-            de = e_step if e_fwd else -e_step
+            if e_fwd:
+                de = self.extrude_increment
+                e_speed = self.extrude_speed
+            else:
+                de = -self.retract_increment
+                e_speed = self.retract_speed
 
         if dx == 0. and dy == 0. and dz == 0. and de == 0.:
             return eventtime + LOOP_INTERVAL
@@ -252,9 +262,9 @@ class CustomCTRL:
             if dz != 0.:
                 active_speeds.append(self.jog_speed['z'])
             if de != 0.:
-                # When extruding or retracting, keep extrusion rate constant
-                # regardless of which axis buttons are pressed.
-                speed = self.extrude_rate
+                # When extruding or retracting, always use the configured
+                # extrusion / retraction speed, regardless of jog buttons.
+                speed = e_speed
             else:
                 speed = max(active_speeds) if active_speeds else self.jog_speed['x']
             max_vel = self.toolhead.get_max_velocity()[0]
