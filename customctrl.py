@@ -173,9 +173,15 @@ class CustomCTRL:
         try:
             cur = self.toolhead.get_position()
             new_pos = [cur[0] + dx, cur[1] + dy, cur[2] + dz, cur[3] + de]
+            new_pos = self._clamp_to_limits(new_pos)
+            if (new_pos[0] == cur[0] and new_pos[1] == cur[1]
+                    and new_pos[2] == cur[2] and new_pos[3] == cur[3]):
+                return eventtime + LOOP_INTERVAL
             speed = self.jog_speed
             if dx == 0. and dy == 0. and dz == 0.:
                 speed = self.extrude_speed
+            max_vel = self.toolhead.get_max_velocity()[0]
+            speed = min(speed, max_vel)
             self.toolhead.manual_move(new_pos, speed)
             self.toolhead.flush_step_generation()
         except Exception:
@@ -198,6 +204,25 @@ class CustomCTRL:
             if self.button_states.get(name, False):
                 return True
         return False
+
+    # ------------------------------------------------------------------
+    # Machine limits
+    # ------------------------------------------------------------------
+    def _clamp_to_limits(self, pos):
+        kin = self.toolhead.get_kinematics()
+        eventtime = self.reactor.monotonic()
+        kin_status = kin.get_status(eventtime)
+        axes_min = kin_status.get('axes_min', (-9999., -9999., -9999.))
+        axes_max = kin_status.get('axes_max', (9999., 9999., 9999.))
+        clamped = list(pos)
+        for i in range(3):
+            lo = axes_min[i] if i < len(axes_min) else -9999.
+            hi = axes_max[i] if i < len(axes_max) else 9999.
+            if clamped[i] < lo:
+                clamped[i] = lo
+            elif clamped[i] > hi:
+                clamped[i] = hi
+        return clamped
 
     # ------------------------------------------------------------------
     # Safety checks
