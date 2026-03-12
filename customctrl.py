@@ -251,10 +251,12 @@ class CustomCTRL:
                 active_speeds.append(self.jog_speed['y'])
             if dz != 0.:
                 active_speeds.append(self.jog_speed['z'])
-            if not active_speeds:
+            if de != 0.:
+                # When extruding or retracting, keep extrusion rate constant
+                # regardless of which axis buttons are pressed.
                 speed = self.extrude_rate
             else:
-                speed = max(active_speeds)
+                speed = max(active_speeds) if active_speeds else self.jog_speed['x']
             max_vel = self.toolhead.get_max_velocity()[0]
             speed = min(speed, max_vel)
             self.toolhead.manual_move(new_pos, speed)
