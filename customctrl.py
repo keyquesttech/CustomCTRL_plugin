@@ -328,9 +328,7 @@ class CustomCTRL:
             })
 
             self.toolhead.manual_move(new_pos, speed)
-            # Do not flush here: blocking would slow the loop when moves are
-            # accel-limited (~10 Hz), so adding a second axis would split the rate
-            # and feel slower. Queue at 20 Hz; flush only on release (_stop_jog_loop).
+            self.toolhead.flush_step_generation()
         except Exception as e:
             self._log_error("jog tick failed: %s" % e)
 
