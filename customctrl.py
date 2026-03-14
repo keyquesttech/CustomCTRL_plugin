@@ -70,7 +70,6 @@ class CustomCTRL:
         self.jog_timer = None
         self.is_ready = False
         self._last_block_reason = None
-        self._jog_first_tick = False
 
         # Classify which button names are "continuous" (jog / extrude)
         self._continuous_names = set(self.jog_pins.keys())
@@ -199,6 +198,9 @@ class CustomCTRL:
         if pin_name in self._continuous_names:
             if pressed and not prev:
                 self._ensure_jog_loop_running(eventtime)
+            elif not pressed and prev and not self._any_continuous_held():
+                # All continuous buttons released — stop and flush immediately (no wait for next tick)
+                self._stop_jog_loop()
 
     # ------------------------------------------------------------------
     # Macro execution
@@ -221,9 +223,9 @@ class CustomCTRL:
     def _ensure_jog_loop_running(self, eventtime):
         if self.jog_timer is not None:
             return
-        self._jog_first_tick = True
         self._log_info("jog loop started")
-        waketime = self.reactor.monotonic() + LOOP_INTERVAL
+        # Run first tick immediately (no 50ms delay); subsequent ticks every LOOP_INTERVAL
+        waketime = self.reactor.monotonic()
         self.jog_timer = self.reactor.register_timer(
             self._jog_tick, waketime)
 
@@ -326,12 +328,7 @@ class CustomCTRL:
             })
 
             self.toolhead.manual_move(new_pos, speed)
-            # Flush only on first tick (so first move runs immediately) and on button
-            # release. Flushing every tick would block and slow the loop when moves
-            # are acceleration-limited, making multi-axis jogging feel slower.
-            if getattr(self, "_jog_first_tick", False):
-                self._jog_first_tick = False
-                self.toolhead.flush_step_generation()
+            self.toolhead.flush_step_generation()
         except Exception as e:
             self._log_error("jog tick failed: %s" % e)
 
