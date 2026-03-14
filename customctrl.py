@@ -6,7 +6,7 @@
 
 import math, logging
 
-LOOP_INTERVAL = 0.050  # 20 Hz
+LOOP_INTERVAL = 0.025  # 40 Hz (shorter ticks = faster stop response)
 
 class CustomCTRL:
     def __init__(self, config):
@@ -96,29 +96,6 @@ class CustomCTRL:
     def _log_error(self, msg):
         logging.warning("customctrl: %s", msg)
         self.gcode.respond_info("CustomCTRL ERROR: %s" % msg)
-
-    # ------------------------------------------------------------------
-    # Debug logging (for jitter investigation)
-    # ------------------------------------------------------------------
-    def _dbg_log(self, hypothesis_id, message, data):
-        # region agent log
-        try:
-            import json, time
-            payload = {
-                "sessionId": "33c95a",
-                "runId": "pre-fix",
-                "hypothesisId": hypothesis_id,
-                "location": "customctrl.py",
-                "message": message,
-                "data": data,
-                "timestamp": int(time.time() * 1000),
-            }
-            with open("debug-33c95a.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload) + "\n")
-        except Exception:
-            # Swallow all logging errors to avoid impacting motion
-            pass
-        # endregion agent log
 
     # ------------------------------------------------------------------
     # Startup
@@ -224,10 +201,13 @@ class CustomCTRL:
         if self.jog_timer is not None:
             return
         self._log_info("jog loop started")
-        # Run first tick immediately (no 50ms delay); subsequent ticks every LOOP_INTERVAL
-        waketime = self.reactor.monotonic()
+        # First tick runs synchronously so motion starts immediately (no wait for timer).
+        # Timer is scheduled one interval from now so we don't double-fire.
+        waketime = eventtime + LOOP_INTERVAL
         self.jog_timer = self.reactor.register_timer(
             self._jog_tick, waketime)
+        # Run one tick now so there's no delay from press to first move
+        self._jog_tick(eventtime)
 
     def _axis_delta(self, axis):
         """Return signed step for an axis based on pos/neg button states."""
@@ -271,13 +251,6 @@ class CustomCTRL:
                 de = -self.retract_increment
                 e_speed = self.retract_speed
 
-        # Log the computed deltas for jitter analysis (H1: step size / direction)
-        self._dbg_log("H1", "jog_tick_deltas", {
-            "dx": dx, "dy": dy, "dz": dz, "de": de,
-            "e_speed": e_speed,
-            "buttons": {k: v for k, v in self.button_states.items() if v},
-        })
-
         if dx == 0. and dy == 0. and dz == 0. and de == 0.:
             return eventtime + LOOP_INTERVAL
 
@@ -316,16 +289,6 @@ class CustomCTRL:
                 ) or self.jog_speed['x']
             max_vel = self.toolhead.get_max_velocity()[0]
             speed = min(speed, max_vel)
-
-            # Log the final speed and position (H2: interaction between speed and jitter)
-            self._dbg_log("H2", "jog_tick_move", {
-                "speed": speed,
-                "cur": cur,
-                "new_pos": new_pos,
-                "L_xyz": L_xyz,
-                "t_max": t_max,
-                "max_vel": max_vel,
-            })
 
             self.toolhead.manual_move(new_pos, speed)
             self.toolhead.flush_step_generation()

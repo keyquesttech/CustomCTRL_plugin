@@ -2,7 +2,7 @@
 
 A Klipper "Extra" that reads physical buttons wired to the MCU and provides:
 
-- **Instant multi-axis jogging** — hold a button to jog X, Y, or Z continuously at 20 Hz. Multiple axes can be held simultaneously for diagonal movement.
+- **Instant multi-axis jogging** — hold a button to jog X, Y, or Z continuously at 40 Hz. Multiple axes can be held simultaneously for diagonal movement.
 - **Hold-to-extrude** — hold the extrude button for continuous filament extrusion based on volumetric flow rate, combinable with jog buttons.
 - **Macro buttons** — press once to fire any G-code macro.
 - **Stop on release** — motion and extrusion halt the moment all buttons are released.
@@ -58,7 +58,7 @@ Each axis has separate positive and negative direction pins. Define only the dir
 | `y_jog_increment` | `0` | Y distance per tick in mm (0 = derive from speed) |
 | `z_jog_increment` | `0` | Z distance per tick in mm (0 = derive from speed) |
 
-When `*_jog_increment` is 0 (default), the per-tick distance is `speed * 0.05s`. When set, it overrides the speed-derived value for that axis, giving fixed-distance-per-tick control.
+When `*_jog_increment` is 0 (default), the per-tick distance is `speed * 0.025s` (40 Hz). When set, it overrides the speed-derived value for that axis, giving fixed-distance-per-tick control.
 
 If both positive and negative buttons for the same axis are held simultaneously, they cancel out and the axis does not move.
 
@@ -116,8 +116,8 @@ Follows standard Klipper pin notation:
 1. On `klippy:ready`, CustomCTRL registers each configured pin with Klipper's `buttons` module.
 2. Button press/release events update an internal state dictionary.
 3. When any jog or extrude button is pressed, a 20 Hz reactor timer starts.
-4. Each timer tick reads button states, builds an XYZE delta vector (with E derived from volumetric flow), and calls `toolhead.manual_move()`. Moves chain through the lookahead queue for smooth acceleration.
-5. When all continuous buttons are released, the timer stops and `flush_step_generation()` halts motion instantly.
+4. The first move runs synchronously when a jog/extrude button is pressed (no wait for the timer). Each 40 Hz timer tick then reads button states, builds an XYZE delta vector (with E from configured increments), and calls `toolhead.manual_move()`. Moves chain through the lookahead queue for smooth acceleration.
+5. When all continuous buttons are released, the timer stops and `flush_step_generation()` halts motion; the 40 Hz tick interval keeps the last queued move short for quicker stop response.
 6. Macro buttons fire their configured G-code once per press via `gcode.run_script_from_command()`.
 
 ## License
