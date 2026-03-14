@@ -70,6 +70,7 @@ class CustomCTRL:
         self.jog_timer = None
         self.is_ready = False
         self._last_block_reason = None
+        self._jog_first_tick = False
 
         # Classify which button names are "continuous" (jog / extrude)
         self._continuous_names = set(self.jog_pins.keys())
@@ -220,6 +221,7 @@ class CustomCTRL:
     def _ensure_jog_loop_running(self, eventtime):
         if self.jog_timer is not None:
             return
+        self._jog_first_tick = True
         self._log_info("jog loop started")
         waketime = self.reactor.monotonic() + LOOP_INTERVAL
         self.jog_timer = self.reactor.register_timer(
@@ -284,7 +286,10 @@ class CustomCTRL:
             if (new_pos[0] == cur[0] and new_pos[1] == cur[1]
                     and new_pos[2] == cur[2] and new_pos[3] == cur[3]):
                 return eventtime + LOOP_INTERVAL
-
+            dx = new_pos[0] - cur[0]
+            dy = new_pos[1] - cur[1]
+            dz = new_pos[2] - cur[2]
+            de = new_pos[3] - cur[3]
             # Compute feed rate so each moving axis (and E) can reach its intended speed.
             # Move time T = max(|delta|/speed for each axis). Then path speed = L_xyz/T.
             L_xyz = math.sqrt(dx*dx + dy*dy + dz*dz)
@@ -321,7 +326,12 @@ class CustomCTRL:
             })
 
             self.toolhead.manual_move(new_pos, speed)
-            self.toolhead.flush_step_generation()
+            # Flush only on first tick (so first move runs immediately) and on button
+            # release. Flushing every tick would block and slow the loop when moves
+            # are acceleration-limited, making multi-axis jogging feel slower.
+            if getattr(self, "_jog_first_tick", False):
+                self._jog_first_tick = False
+                self.toolhead.flush_step_generation()
         except Exception as e:
             self._log_error("jog tick failed: %s" % e)
 
