@@ -284,19 +284,29 @@ class CustomCTRL:
             if (new_pos[0] == cur[0] and new_pos[1] == cur[1]
                     and new_pos[2] == cur[2] and new_pos[3] == cur[3]):
                 return eventtime + LOOP_INTERVAL
-            active_speeds = []
+
+            # Compute feed rate so each moving axis (and E) can reach its intended speed.
+            # Move time T = max(|delta|/speed for each axis). Then path speed = L_xyz/T.
+            L_xyz = math.sqrt(dx*dx + dy*dy + dz*dz)
+            t_max = 0.
             if dx != 0.:
-                active_speeds.append(self.jog_speed['x'])
+                t_max = max(t_max, abs(dx) / self.jog_speed['x'])
             if dy != 0.:
-                active_speeds.append(self.jog_speed['y'])
+                t_max = max(t_max, abs(dy) / self.jog_speed['y'])
             if dz != 0.:
-                active_speeds.append(self.jog_speed['z'])
+                t_max = max(t_max, abs(dz) / self.jog_speed['z'])
             if de != 0.:
-                # When extruding or retracting, always use the configured
-                # extrusion / retraction speed, regardless of jog buttons.
+                t_max = max(t_max, abs(de) / e_speed)
+            if L_xyz > 0. and t_max > 0.:
+                speed = L_xyz / t_max
+            elif de != 0.:
                 speed = e_speed
             else:
-                speed = max(active_speeds) if active_speeds else self.jog_speed['x']
+                speed = max(
+                    self.jog_speed['x'] if dx != 0. else 0.,
+                    self.jog_speed['y'] if dy != 0. else 0.,
+                    self.jog_speed['z'] if dz != 0. else 0.,
+                ) or self.jog_speed['x']
             max_vel = self.toolhead.get_max_velocity()[0]
             speed = min(speed, max_vel)
 
@@ -305,7 +315,8 @@ class CustomCTRL:
                 "speed": speed,
                 "cur": cur,
                 "new_pos": new_pos,
-                "active_speeds": active_speeds,
+                "L_xyz": L_xyz,
+                "t_max": t_max,
                 "max_vel": max_vel,
             })
 
