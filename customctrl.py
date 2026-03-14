@@ -7,6 +7,7 @@
 import math, logging
 
 LOOP_INTERVAL = 0.025  # 40 Hz (shorter ticks = faster stop response)
+BATCH_TICKS = 2       # Moves issued every BATCH_TICKS ticks (longer moves = reach full speed)
 
 class CustomCTRL:
     def __init__(self, config):
@@ -70,6 +71,10 @@ class CustomCTRL:
         self.jog_timer = None
         self.is_ready = False
         self._last_block_reason = None
+        # Batching: accumulate deltas over BATCH_TICKS so each move is longer (toolhead reaches full speed)
+        self._acc_dx = self._acc_dy = self._acc_dz = self._acc_de = 0.
+        self._acc_ticks = 0
+        self._first_tick_done = False
 
         # Classify which button names are "continuous" (jog / extrude)
         self._continuous_names = set(self.jog_pins.keys())
@@ -201,6 +206,9 @@ class CustomCTRL:
         if self.jog_timer is not None:
             return
         self._log_info("jog loop started")
+        self._acc_dx = self._acc_dy = self._acc_dz = self._acc_de = 0.
+        self._acc_ticks = 0
+        self._first_tick_done = False
         # First tick runs synchronously so motion starts immediately (no wait for timer).
         # Timer is scheduled one interval from now so we don't double-fire.
         waketime = eventtime + LOOP_INTERVAL
@@ -218,6 +226,44 @@ class CustomCTRL:
         inc = self.jog_increment[axis]
         step = inc if inc > 0. else self.jog_speed[axis] * LOOP_INTERVAL
         return step if pos else -step
+
+    def _do_move(self, dx, dy, dz, de, e_speed):
+        """Queue one manual move with given deltas; flush_step_generation is called inside."""
+        cur = self.toolhead.get_position()
+        new_pos = [cur[0] + dx, cur[1] + dy, cur[2] + dz, cur[3] + de]
+        new_pos = self._clamp_to_limits(new_pos)
+        dx = new_pos[0] - cur[0]
+        dy = new_pos[1] - cur[1]
+        dz = new_pos[2] - cur[2]
+        de = new_pos[3] - cur[3]
+        if dx == 0. and dy == 0. and dz == 0. and de == 0.:
+            return
+        if de != 0. and e_speed <= 0.:
+            e_speed = self.extrude_speed if de > 0. else self.retract_speed
+        L_xyz = math.sqrt(dx*dx + dy*dy + dz*dz)
+        t_max = 0.
+        if dx != 0.:
+            t_max = max(t_max, abs(dx) / self.jog_speed['x'])
+        if dy != 0.:
+            t_max = max(t_max, abs(dy) / self.jog_speed['y'])
+        if dz != 0.:
+            t_max = max(t_max, abs(dz) / self.jog_speed['z'])
+        if de != 0.:
+            t_max = max(t_max, abs(de) / e_speed)
+        if L_xyz > 0. and t_max > 0.:
+            speed = L_xyz / t_max
+        elif de != 0.:
+            speed = e_speed
+        else:
+            speed = max(
+                self.jog_speed['x'] if dx != 0. else 0.,
+                self.jog_speed['y'] if dy != 0. else 0.,
+                self.jog_speed['z'] if dz != 0. else 0.,
+            ) or self.jog_speed['x']
+        max_vel = self.toolhead.get_max_velocity()[0]
+        speed = min(speed, max_vel)
+        self.toolhead.manual_move(new_pos, speed)
+        self.toolhead.flush_step_generation()
 
     def _jog_tick(self, eventtime):
         if not self._any_continuous_held():
@@ -252,46 +298,29 @@ class CustomCTRL:
                 e_speed = self.retract_speed
 
         if dx == 0. and dy == 0. and dz == 0. and de == 0.:
+            self._acc_dx = self._acc_dy = self._acc_dz = self._acc_de = 0.
+            self._acc_ticks = 0
             return eventtime + LOOP_INTERVAL
 
         try:
-            cur = self.toolhead.get_position()
-            new_pos = [cur[0] + dx, cur[1] + dy, cur[2] + dz, cur[3] + de]
-            new_pos = self._clamp_to_limits(new_pos)
-            if (new_pos[0] == cur[0] and new_pos[1] == cur[1]
-                    and new_pos[2] == cur[2] and new_pos[3] == cur[3]):
+            # First tick after press: issue one move immediately for instant response
+            if not self._first_tick_done:
+                self._do_move(dx, dy, dz, de, e_speed)
+                self._first_tick_done = True
                 return eventtime + LOOP_INTERVAL
-            dx = new_pos[0] - cur[0]
-            dy = new_pos[1] - cur[1]
-            dz = new_pos[2] - cur[2]
-            de = new_pos[3] - cur[3]
-            # Compute feed rate so each moving axis (and E) can reach its intended speed.
-            # Move time T = max(|delta|/speed for each axis). Then path speed = L_xyz/T.
-            L_xyz = math.sqrt(dx*dx + dy*dy + dz*dz)
-            t_max = 0.
-            if dx != 0.:
-                t_max = max(t_max, abs(dx) / self.jog_speed['x'])
-            if dy != 0.:
-                t_max = max(t_max, abs(dy) / self.jog_speed['y'])
-            if dz != 0.:
-                t_max = max(t_max, abs(dz) / self.jog_speed['z'])
-            if de != 0.:
-                t_max = max(t_max, abs(de) / e_speed)
-            if L_xyz > 0. and t_max > 0.:
-                speed = L_xyz / t_max
-            elif de != 0.:
-                speed = e_speed
-            else:
-                speed = max(
-                    self.jog_speed['x'] if dx != 0. else 0.,
-                    self.jog_speed['y'] if dy != 0. else 0.,
-                    self.jog_speed['z'] if dz != 0. else 0.,
-                ) or self.jog_speed['x']
-            max_vel = self.toolhead.get_max_velocity()[0]
-            speed = min(speed, max_vel)
-
-            self.toolhead.manual_move(new_pos, speed)
-            self.toolhead.flush_step_generation()
+            # Otherwise accumulate; issue one longer move every BATCH_TICKS
+            self._acc_dx += dx
+            self._acc_dy += dy
+            self._acc_dz += dz
+            self._acc_de += de
+            self._acc_ticks += 1
+            if self._acc_ticks >= BATCH_TICKS:
+                self._do_move(
+                    self._acc_dx, self._acc_dy, self._acc_dz, self._acc_de,
+                    e_speed,
+                )
+                self._acc_dx = self._acc_dy = self._acc_dz = self._acc_de = 0.
+                self._acc_ticks = 0
         except Exception as e:
             self._log_error("jog tick failed: %s" % e)
 
@@ -302,6 +331,9 @@ class CustomCTRL:
             self.reactor.unregister_timer(self.jog_timer)
             self.jog_timer = None
         self._last_block_reason = None
+        self._acc_dx = self._acc_dy = self._acc_dz = self._acc_de = 0.
+        self._acc_ticks = 0
+        self._first_tick_done = False
         try:
             if self.toolhead is not None:
                 self.toolhead.flush_step_generation()

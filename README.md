@@ -116,7 +116,7 @@ Follows standard Klipper pin notation:
 1. On `klippy:ready`, CustomCTRL registers each configured pin with Klipper's `buttons` module.
 2. Button press/release events update an internal state dictionary.
 3. When any jog or extrude button is pressed, a 20 Hz reactor timer starts.
-4. The first move runs synchronously when a jog/extrude button is pressed (no wait for the timer). Each 40 Hz timer tick then reads button states, builds an XYZE delta vector (with E from configured increments), and calls `toolhead.manual_move()`. Moves chain through the lookahead queue for smooth acceleration.
+4. The first move runs synchronously when a jog/extrude button is pressed (no wait for the timer). Each 40 Hz timer tick then reads button states and accumulates deltas; a move is issued every 2 ticks (batched) so each move is ~50 ms long and the toolhead can reach full speed. `flush_step_generation()` is still called after every move (instant stop on release).
 5. When all continuous buttons are released, the timer stops and `flush_step_generation()` halts motion; the 40 Hz tick interval keeps the last queued move short for quicker stop response.
 6. Macro buttons fire their configured G-code once per press via `gcode.run_script_from_command()`.
 
